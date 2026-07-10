@@ -155,4 +155,14 @@ Respond ONLY with a valid JSON array, no markdown, no explanation. Format:
 
 // ─── Start server ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
+// Keep server awake — pings itself every 10 minutes
+const SELF_URL = process.env.RAILWAY_PUBLIC_DOMAIN
+  ? 'https://'+process.env.RAILWAY_PUBLIC_DOMAIN
+  : 'http://localhost:'+( process.env.PORT || 3000);
+
+setInterval(() => {
+  fetch(SELF_URL+'/')
+    .then(() => console.log('Keep-alive ping sent'))
+    .catch(err => console.log('Keep-alive failed:', err.message));
+}, 10 * 60 * 1000); // every 10 minutes
 app.listen(PORT, () => console.log(`Quiz API running on port ${PORT}`));
