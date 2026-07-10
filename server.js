@@ -5,10 +5,11 @@ const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch
 const app = express();
 app.use(cors({
   origin: [
-    'https://rebornandresell.com',
     'https://www.rebornandresell.com',
+    'https://rebornandresell.com',
+    'https://reborn-resell.myshopify.com',
     'http://localhost:8080',
-    'null' // for local file testing
+    'null'
   ],
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type']
