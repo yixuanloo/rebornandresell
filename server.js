@@ -3,17 +3,7 @@ const cors = require('cors');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 const app = express();
-app.use(cors({
-  origin: [
-    'https://www.rebornandresell.com',
-    'https://rebornandresell.com',
-    'https://reborn-resell.myshopify.com',
-    'http://localhost:8080',
-    'null'
-  ],
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type']
-}));
+app.use(cors());
 app.use(express.json());
 
 const SHOPIFY_STORE = process.env.SHOPIFY_STORE; // e.g. rebornandresell.myshopify.com
