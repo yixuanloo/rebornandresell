@@ -42,7 +42,7 @@ async function getProducts() {
       
       const data = await response.json();
       productCache = data.products || [];
-      cacheExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes cache
+      cacheExpiry = Date.now() + 30 * 60 * 1000; // 30 minutes cache
       console.log('Cached', productCache.length, 'products');
       return productCache;
     } catch(err) {
@@ -186,4 +186,12 @@ setInterval(() => {
   fetch(SELF_URL + '/').then(() => console.log('Keep-alive ping sent')).catch(() => {});
 }, 10 * 60 * 1000);
 
-app.listen(PORT, () => console.log(`Quiz API running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Quiz API running on port ${PORT}`);
+  // Pre-warm product cache on startup
+  setTimeout(() => {
+    getProducts()
+      .then(p => console.log('Startup cache warm: loaded', p.length, 'products'))
+      .catch(err => console.log('Startup cache warm failed:', err.message));
+  }, 3000);
+});
