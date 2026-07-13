@@ -18,14 +18,39 @@ async function getProducts() {
     return productCache;
   }
   console.log('Fetching fresh products from Shopify...');
-  const url = `https://${SHOPIFY_STORE}/products.json?limit=250`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Shopify fetch error: ${response.status}`);
-  const data = await response.json();
-  productCache = data.products || [];
-  cacheExpiry = Date.now() + 5 * 60 * 1000; // 5 minutes
-  console.log('Cached', productCache.length, 'products');
-  return productCache;
+  
+  // Try with retries and exponential backoff
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const url = `https://${SHOPIFY_STORE}/products.json?limit=250`;
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'RebornResellQuizAPI/1.0',
+          'Accept': 'application/json'
+        }
+      });
+      
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('Retry-After') || (attempt * 2);
+        console.log(`Rate limited, waiting ${retryAfter}s before retry ${attempt}/${maxRetries}`);
+        await new Promise(r => setTimeout(r, retryAfter * 1000));
+        continue;
+      }
+      
+      if (!response.ok) throw new Error(`Shopify fetch error: ${response.status}`);
+      
+      const data = await response.json();
+      productCache = data.products || [];
+      cacheExpiry = Date.now() + 10 * 60 * 1000; // 10 minutes cache
+      console.log('Cached', productCache.length, 'products');
+      return productCache;
+    } catch(err) {
+      if (attempt === maxRetries) throw err;
+      await new Promise(r => setTimeout(r, attempt * 2000));
+    }
+  }
+  throw new Error('Failed to fetch products after retries');
 }
 
 // ─── Health check ─────────────────────────────────────────────────────────────
