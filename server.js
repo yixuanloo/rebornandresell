@@ -9,15 +9,30 @@ const SHOPIFY_STORE  = process.env.SHOPIFY_STORE;
 const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY;
 
 app.get('/', (req, res) => res.json({ status: 'ok', message: 'Reborn & Resell Quiz API' }));
+const path = require('path');
+const fs = require('fs');
+
+// ─── Serve quiz HTML ──────────────────────────────────────────────────────────
+app.get('/quiz', (req, res) => {
+  const quizPath = path.join(__dirname, 'quiz.html');
+  if (fs.existsSync(quizPath)) {
+    res.setHeader('Content-Type', 'text/html');
+    res.sendFile(quizPath);
+  } else {
+    res.status(404).send('Quiz not found');
+  }
+});
+
+
 
 app.post('/recommend', async (req, res) => {
   try {
-    const { who, use, budget, brand } = req.body;
+    const { who, gender, use, budget, brand } = req.body;
     const products = await fetchShopifyProducts(budget, brand);
     if (!products.length) {
       return res.status(404).json({ error: 'No products found matching criteria' });
     }
-    const recommendations = await askClaude({ who, use, budget, brand }, products);
+    const recommendations = await askClaude({ who, gender, use, budget, brand }, products);
     res.json({ recommendations });
   } catch (err) {
     console.error(err);
@@ -55,7 +70,7 @@ async function fetchShopifyProducts(budget, brands) {
 }
 
 async function askClaude(answers, products) {
-  const { who, use, budget, brand } = answers;
+  const { who, gender, use, budget, brand } = answers;
   const budgetStr = budget
     ? `RM ${budget.min.toLocaleString()} – ${budget.max >= 100000 ? 'RM 100,000+' : 'RM ' + budget.max.toLocaleString()}`
     : 'any budget';
@@ -71,6 +86,7 @@ async function askClaude(answers, products) {
   const prompt = `You are a luxury bag curator for Reborn & Resell, a pre-owned luxury marketplace in Malaysia.
 A customer has completed our personalisation quiz with these answers:
 - Buying for: ${who === 'self' ? 'themselves' : 'someone else'}
+- Gender: ${gender === 'female' ? 'Female' : gender === 'male' ? 'Male' : 'Not specified'}
 - Use case: ${useMap[use] || use}
 - Budget: ${budgetStr}
 - Preferred brands: ${brandStr}
