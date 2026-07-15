@@ -26,11 +26,8 @@ app.post('/recommend', async (req, res) => {
 });
 
 async function fetchShopifyProducts(budget, brands) {
-  const url = `https://${SHOPIFY_STORE}/products.json?limit=250`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Shopify fetch error: ${response.status}`);
-  const data = await response.json();
-  let products = data.products || [];
+  const rawProducts = await getShopifyCatalog();
+  let products = rawProducts;
 
   if (budget && budget.min !== undefined) {
     products = products.filter(p => {
@@ -53,6 +50,47 @@ async function fetchShopifyProducts(budget, brands) {
     url:         `https://${SHOPIFY_STORE}/products/${p.handle}`,
     description: p.body_html?.replace(/<[^>]+>/g, '').slice(0, 200) || ''
   }));
+}
+
+// ─── Cached Shopify catalog fetch with retry-on-429 ───────────────────────────
+let catalogCache = { data: null, fetchedAt: 0 };
+const CATALOG_CACHE_MS = 60 * 1000; // reuse the same catalog for 60s
+
+async function getShopifyCatalog() {
+  const now = Date.now();
+  if (catalogCache.data && (now - catalogCache.fetchedAt) < CATALOG_CACHE_MS) {
+    console.log('Using cached Shopify catalog');
+    return catalogCache.data;
+  }
+
+  const url = `https://${SHOPIFY_STORE}/products.json?limit=250`;
+  const maxRetries = 3;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const response = await fetch(url);
+
+    if (response.status === 429) {
+      const retryAfter = parseFloat(response.headers.get('retry-after')) || attempt * 1.5;
+      console.warn(`Shopify rate limited (429). Retrying in ${retryAfter}s (attempt ${attempt}/${maxRetries})`);
+      if (attempt === maxRetries) {
+        // Fall back to stale cache rather than fail the whole request, if we have one
+        if (catalogCache.data) {
+          console.warn('Serving stale cached catalog after repeated 429s');
+          return catalogCache.data;
+        }
+        throw new Error(`Shopify fetch error: 429 (rate limited after ${maxRetries} attempts)`);
+      }
+      await new Promise(r => setTimeout(r, retryAfter * 1000));
+      continue;
+    }
+
+    if (!response.ok) throw new Error(`Shopify fetch error: ${response.status}`);
+
+    const data = await response.json();
+    const products = data.products || [];
+    catalogCache = { data: products, fetchedAt: now };
+    return products;
+  }
 }
 
 async function askClaude(answers, products) {
