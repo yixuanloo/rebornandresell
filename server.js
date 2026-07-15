@@ -50,6 +50,7 @@ async function fetchShopifyProducts(budget, brands) {
     price:       p.variants[0]?.price || '0',
     tags:        p.tags,
     image:       p.images[0]?.src || null,
+    url:         `https://${SHOPIFY_STORE}/products/${p.handle}`,
     description: p.body_html?.replace(/<[^>]+>/g, '').slice(0, 200) || ''
   }));
 }
