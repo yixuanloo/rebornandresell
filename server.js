@@ -26,7 +26,7 @@ app.post('/recommend', async (req, res) => {
 });
 
 async function fetchShopifyProducts(budget, brands) {
-  const rawProducts = await getShopifyCatalog();
+  const rawProducts = getShopifyCatalog();
   let products = rawProducts;
 
   if (budget && budget.min !== undefined) {
@@ -52,46 +52,60 @@ async function fetchShopifyProducts(budget, brands) {
   }));
 }
 
-// ─── Cached Shopify catalog fetch with retry-on-429 ───────────────────────────
-let catalogCache = { data: null, fetchedAt: 0 };
-const CATALOG_CACHE_MS = 60 * 1000; // reuse the same catalog for 60s
+// ─── Background-refreshed Shopify catalog cache ───────────────────────────────
+// The catalog is fetched on a timer, independent of incoming /recommend requests.
+// This means user requests never wait on a live Shopify call (or its rate limits) —
+// they just read whatever is currently in memory.
+let catalogCache = [];
+let catalogReady = false;
+const CATALOG_REFRESH_MS = 5 * 60 * 1000; // refresh every 5 minutes
 
-async function getShopifyCatalog() {
-  const now = Date.now();
-  if (catalogCache.data && (now - catalogCache.fetchedAt) < CATALOG_CACHE_MS) {
-    console.log('Using cached Shopify catalog');
-    return catalogCache.data;
+function getShopifyCatalog() {
+  if (!catalogReady) {
+    throw new Error('Catalog not loaded yet — server is still starting up. Please try again in a few seconds.');
   }
+  return catalogCache;
+}
 
+async function refreshShopifyCatalog() {
   const url = `https://${SHOPIFY_STORE}/products.json?limit=250`;
   const maxRetries = 3;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    const response = await fetch(url);
+    try {
+      const response = await fetch(url);
 
-    if (response.status === 429) {
-      const retryAfter = parseFloat(response.headers.get('retry-after')) || attempt * 1.5;
-      console.warn(`Shopify rate limited (429). Retrying in ${retryAfter}s (attempt ${attempt}/${maxRetries})`);
-      if (attempt === maxRetries) {
-        // Fall back to stale cache rather than fail the whole request, if we have one
-        if (catalogCache.data) {
-          console.warn('Serving stale cached catalog after repeated 429s');
-          return catalogCache.data;
+      if (response.status === 429) {
+        // Cap the wait — Shopify's Retry-After can be long, but this runs in the
+        // background so it's fine; just don't let a single attempt hang forever.
+        const retryAfter = Math.min(parseFloat(response.headers.get('retry-after')) || attempt * 2, 30);
+        console.warn(`[catalog refresh] Shopify rate limited (429). Retrying in ${retryAfter}s (attempt ${attempt}/${maxRetries})`);
+        if (attempt === maxRetries) {
+          console.warn('[catalog refresh] Giving up this cycle, will retry on next scheduled refresh. Serving existing cache in the meantime.');
+          return;
         }
-        throw new Error(`Shopify fetch error: 429 (rate limited after ${maxRetries} attempts)`);
+        await new Promise(r => setTimeout(r, retryAfter * 1000));
+        continue;
       }
-      await new Promise(r => setTimeout(r, retryAfter * 1000));
-      continue;
+
+      if (!response.ok) throw new Error(`Shopify fetch error: ${response.status}`);
+
+      const data = await response.json();
+      catalogCache = data.products || [];
+      catalogReady = true;
+      console.log(`[catalog refresh] Loaded ${catalogCache.length} products`);
+      return;
+    } catch (err) {
+      console.error('[catalog refresh] Error:', err.message);
+      if (attempt === maxRetries) return; // keep serving whatever is already cached
+      await new Promise(r => setTimeout(r, attempt * 2000));
     }
-
-    if (!response.ok) throw new Error(`Shopify fetch error: ${response.status}`);
-
-    const data = await response.json();
-    const products = data.products || [];
-    catalogCache = { data: products, fetchedAt: now };
-    return products;
   }
 }
+
+// Kick off the first load immediately, then keep refreshing on a timer
+refreshShopifyCatalog();
+setInterval(refreshShopifyCatalog, CATALOG_REFRESH_MS);
 
 async function askClaude(answers, products) {
   const { who, use, budget, brand } = answers;
