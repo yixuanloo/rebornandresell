@@ -13,7 +13,7 @@ app.get('/', (req, res) => res.json({ status: 'ok', message: 'Reborn & Resell Qu
 app.post('/recommend', async (req, res) => {
   try {
     const { who, use, budget, brand } = req.body;
-    const products = await fetchShopifyProducts(budget, brand);
+    const products = await fetchShopifyProducts(budget, brand, use);
     if (!products.length) {
       return res.status(404).json({ error: 'No products found matching criteria' });
     }
@@ -25,9 +25,32 @@ app.post('/recommend', async (req, res) => {
   }
 });
 
-async function fetchShopifyProducts(budget, brands) {
+// Keywords used to classify a product as "watch/jewellery" rather than "bag".
+// Checked against Shopify's product_type field first, then tags as a fallback.
+const WATCH_JEWELLERY_KEYWORDS = [
+  'watch', 'watches', 'jewellery', 'jewelry', 'ring', 'bracelet',
+  'necklace', 'earring', 'pendant', 'bangle', 'brooch'
+];
+
+function isWatchOrJewellery(p) {
+  const haystack = [
+    p.product_type || '',
+    ...(Array.isArray(p.tags) ? p.tags : (p.tags || '').split(','))
+  ].join(' ').toLowerCase();
+  return WATCH_JEWELLERY_KEYWORDS.some(kw => haystack.includes(kw));
+}
+
+async function fetchShopifyProducts(budget, brands, use) {
   const rawProducts = getShopifyCatalog();
   let products = rawProducts;
+
+  // Hard category filter: if the customer chose "watches & jewellery", show only
+  // those — otherwise (everyday / work / occasion / invest / travel) show only bags.
+  if (use === 'accessories') {
+    products = products.filter(isWatchOrJewellery);
+  } else {
+    products = products.filter(p => !isWatchOrJewellery(p));
+  }
 
   if (budget && budget.min !== undefined) {
     products = products.filter(p => {
@@ -38,7 +61,7 @@ async function fetchShopifyProducts(budget, brands) {
     });
   }
 
-  console.log(`Found ${products.length} products after budget filter`);
+  console.log(`Found ${products.length} products after category + budget filter`);
 
   return products.map(p => ({
     id:          p.id,
@@ -135,7 +158,7 @@ ${JSON.stringify(products, null, 2)}
 Please select the top 6 most suitable items for this customer. Consider:
 1. Budget fit (price within or close to their range)
 2. Brand preference (prioritise preferred brands if available)
-3. Use case suitability — if they selected "watches and accessories", prioritise watches, jewellery and accessories over bags
+3. Use case fit — every item shown to you already matches the customer's chosen category (bags, or watches & jewellery), so focus on style/vibe fit rather than re-filtering by category
 4. Variety — try not to show 6 items from the same brand
 5. For aged/slow-moving stock (products with older tags), give a slight boost if still relevant
 
