@@ -42,9 +42,9 @@ function isWatchOrJewellery(p) {
 
 // Keywords used to classify a product's gender, checked against product_type + tags.
 // Order matters: check "unisex" first so it doesn't get caught by men/women substrings.
-const UNISEX_KEYWORDS = ['unisex', 'uni-sex'];
-const MEN_KEYWORDS   = ['men', 'mens', "men's", 'male', 'gents', "gentleman"];
-const WOMEN_KEYWORDS = ['women', 'womens', "women's", 'female', 'ladies', "lady"];
+const UNISEX_KEYWORDS = ['unisex', 'uni-sex', 'his & hers', 'his and hers'];
+const MEN_KEYWORDS   = ['men', 'mens', "men's", 'male', 'gents', 'gentleman', 'his', 'boyfriend'];
+const WOMEN_KEYWORDS = ['women', 'womens', "women's", 'female', 'ladies', 'lady', 'her', 'girlfriend'];
 
 function classifyGender(p) {
   const haystack = [
