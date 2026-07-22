@@ -12,12 +12,12 @@ app.get('/', (req, res) => res.json({ status: 'ok', message: 'Reborn & Resell Qu
 
 app.post('/recommend', async (req, res) => {
   try {
-    const { who, use, budget, brand } = req.body;
-    const products = await fetchShopifyProducts(budget, brand, use);
+    const { who, gender, use, budget, brand } = req.body;
+    const products = await fetchShopifyProducts(budget, brand, use, gender);
     if (!products.length) {
       return res.status(404).json({ error: 'No products found matching criteria' });
     }
-    const recommendations = await askClaude({ who, use, budget, brand }, products);
+    const recommendations = await askClaude({ who, gender, use, budget, brand }, products);
     res.json({ recommendations });
   } catch (err) {
     console.error(err);
@@ -40,7 +40,29 @@ function isWatchOrJewellery(p) {
   return WATCH_JEWELLERY_KEYWORDS.some(kw => haystack.includes(kw));
 }
 
-async function fetchShopifyProducts(budget, brands, use) {
+// Keywords used to classify a product's gender, checked against product_type + tags.
+// Order matters: check "unisex" first so it doesn't get caught by men/women substrings.
+const UNISEX_KEYWORDS = ['unisex', 'uni-sex'];
+const MEN_KEYWORDS   = ['men', 'mens', "men's", 'male', 'gents', "gentleman"];
+const WOMEN_KEYWORDS = ['women', 'womens', "women's", 'female', 'ladies', "lady"];
+
+function classifyGender(p) {
+  const haystack = [
+    p.product_type || '',
+    ...(Array.isArray(p.tags) ? p.tags : (p.tags || '').split(','))
+  ].join(' ').toLowerCase();
+
+  if (UNISEX_KEYWORDS.some(kw => haystack.includes(kw))) return 'unisex';
+  // Use word-boundary-ish matching so "women" doesn't get missed by a bad "men" match,
+  // and so brand names etc. don't accidentally trigger a match.
+  const hasWomen = WOMEN_KEYWORDS.some(kw => new RegExp(`\\b${kw}\\b`).test(haystack));
+  const hasMen   = !hasWomen && MEN_KEYWORDS.some(kw => new RegExp(`\\b${kw}\\b`).test(haystack));
+  if (hasWomen) return 'women';
+  if (hasMen) return 'men';
+  return 'unisex'; // untagged items are treated as unisex rather than excluded
+}
+
+async function fetchShopifyProducts(budget, brands, use, gender) {
   const rawProducts = getShopifyCatalog();
   let products = rawProducts;
 
@@ -52,6 +74,15 @@ async function fetchShopifyProducts(budget, brands, use) {
     products = products.filter(p => !isWatchOrJewellery(p));
   }
 
+  // Hard gender filter: exclude items explicitly tagged for the opposite gender.
+  // Untagged/unisex items are kept for both, so we never filter down to zero results
+  // just because the store doesn't tag every item's gender.
+  if (gender === 'male') {
+    products = products.filter(p => classifyGender(p) !== 'women');
+  } else if (gender === 'female') {
+    products = products.filter(p => classifyGender(p) !== 'men');
+  }
+
   if (budget && budget.min !== undefined) {
     products = products.filter(p => {
       const prices = p.variants.map(v => parseFloat(v.price));
@@ -61,7 +92,7 @@ async function fetchShopifyProducts(budget, brands, use) {
     });
   }
 
-  console.log(`Found ${products.length} products after category + budget filter`);
+  console.log(`Found ${products.length} products after category + gender + budget filter`);
 
   return products.map(p => ({
     id:          p.id,
@@ -131,11 +162,12 @@ refreshShopifyCatalog();
 setInterval(refreshShopifyCatalog, CATALOG_REFRESH_MS);
 
 async function askClaude(answers, products) {
-  const { who, use, budget, brand } = answers;
+  const { who, gender, use, budget, brand } = answers;
   const budgetStr = budget
     ? `RM ${budget.min.toLocaleString()} – ${budget.max >= 100000 ? 'RM 100,000+' : 'RM ' + budget.max.toLocaleString()}`
     : 'any budget';
   const brandStr = brand && brand.length > 0 ? brand.join(', ') : 'no preference';
+  const genderStr = gender === 'male' ? 'for a man' : gender === 'female' ? 'for a woman' : 'not specified';
   const useMap = {
     everyday:    'everyday use',
     work:        'work and professional settings',
@@ -148,11 +180,12 @@ async function askClaude(answers, products) {
   const prompt = `You are a luxury goods curator for Reborn & Resell, a pre-owned luxury marketplace in Malaysia specialising in bags, watches, jewellery and accessories.
 A customer has completed our personalisation quiz with these answers:
 - Buying for: ${who === 'self' ? 'themselves' : 'someone else'}
+- Shopping for: ${genderStr}
 - Looking for: ${useMap[use] || use}
 - Budget: ${budgetStr}
 - Preferred brands: ${brandStr}
 
-Here are the available products in our inventory:
+Here are the available products in our inventory (already filtered to match their category and, where tagged, their gender):
 ${JSON.stringify(products, null, 2)}
 
 Please select the top 6 most suitable items for this customer. Consider:
@@ -192,7 +225,11 @@ Respond ONLY with a valid JSON array, no markdown, no explanation:
     })
   });
 
-  if (!response.ok) throw new Error(`Claude API error: ${response.status}`);
+  if (!response.ok) {
+    const errBody = await response.text().catch(() => '(could not read error body)');
+    console.error('Claude API error response body:', errBody);
+    throw new Error(`Claude API error: ${response.status} — ${errBody}`);
+  }
   const data = await response.json();
   const text  = data.content[0].text.trim();
   const clean = text.replace(/```json|```/g, '').trim();
