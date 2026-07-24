@@ -195,7 +195,7 @@ Please select the top 6 most suitable items for this customer. Consider:
 4. Variety — try not to show 6 items from the same brand
 5. For aged/slow-moving stock (products with older tags), give a slight boost if still relevant
 
-For each selected item, provide a short personalised reason (1 sentence) explaining why it suits this customer.
+For each selected item, provide a short personalised reason — one short sentence, no more than 20 words, explaining why it suits this customer.
 
 Respond ONLY with a valid JSON array, no markdown, no explanation:
 [
@@ -206,7 +206,7 @@ Respond ONLY with a valid JSON array, no markdown, no explanation:
     "price": "price as number string",
     "image": "image url or null",
     "url": "the exact url field from the matching product in the inventory above",
-    "reason": "One sentence explaining why this suits the customer",
+    "reason": "Short reason, max 20 words, why this suits the customer",
     "tag": "short label e.g. Best Match / Great Value / Staff Pick"
   }
 ]`;
