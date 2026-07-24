@@ -94,6 +94,20 @@ async function fetchShopifyProducts(budget, brands, use, gender) {
 
   console.log(`Found ${products.length} products after category + gender + budget filter`);
 
+  // Sort by closeness to the customer's budget midpoint, then cap the list —
+  // Claude only needs a reasonably-sized shortlist to pick 6 good matches from,
+  // and a smaller payload means a noticeably faster response.
+  if (budget && budget.min !== undefined) {
+    const mid = (budget.min + (budget.max >= 100000 ? budget.min * 3 : budget.max)) / 2;
+    products = [...products].sort((a, b) => {
+      const priceA = Math.min(...a.variants.map(v => parseFloat(v.price)));
+      const priceB = Math.min(...b.variants.map(v => parseFloat(v.price)));
+      return Math.abs(priceA - mid) - Math.abs(priceB - mid);
+    });
+  }
+  const MAX_PRODUCTS_TO_CLAUDE = 40;
+  products = products.slice(0, MAX_PRODUCTS_TO_CLAUDE);
+
   return products.map(p => ({
     id:          p.id,
     title:       p.title,
@@ -102,7 +116,7 @@ async function fetchShopifyProducts(budget, brands, use, gender) {
     tags:        p.tags,
     image:       p.images[0]?.src || null,
     url:         `https://${SHOPIFY_STORE}/products/${p.handle}`,
-    description: p.body_html?.replace(/<[^>]+>/g, '').slice(0, 200) || ''
+    description: p.body_html?.replace(/<[^>]+>/g, '').slice(0, 90) || ''
   }));
 }
 
